@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from examples.problem_def_template import config_prototype, problem_prototype
+from HJI_Vehicle.examples.problem_def_template import config_prototype, problem_prototype
 
 class config_NN (config_prototype):
     def __init__(self, N_states, time_dependent):

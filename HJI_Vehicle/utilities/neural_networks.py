@@ -14,7 +14,7 @@ import time
 import matplotlib.pyplot as plt
 # from lbfgsnew import LBFGSNew
 # from sdlbfgs import SdLBFGS
-from LBFGS import FullBatchLBFGS
+from HJI_Vehicle.LBFGS import FullBatchLBFGS
 
 
 class FC_network(nn.Module):

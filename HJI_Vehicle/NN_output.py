@@ -8,14 +8,14 @@ import numpy as np
 # import scipy.io
 # import time
 
-from utilities.other import int_input, load_NN
-from examples.choose_problem import system, problem, config, time_dependent
+from HJI_Vehicle.utilities.other import int_input, load_NN
+from HJI_Vehicle.examples.choose_problem import system, problem, config, time_dependent
 
 if time_dependent:
-    from utilities.neural_networks import HJB_network
+    from HJI_Vehicle.utilities.neural_networks import HJB_network
     system += '/tspan'
 else:
-    from utilities.neural_networks import HJB_network_t0 as HJB_network
+    from HJI_Vehicle.utilities.neural_networks import HJB_network_t0 as HJB_network
     system += '/t0'
 
 # Loads neural network

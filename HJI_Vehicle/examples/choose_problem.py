@@ -7,7 +7,7 @@ system = 'vehicle'
 time_dependent = True  # True
 
 if system == 'vehicle':
-    from examples.vehicle.problem_def import setup_problem, config_NN
+    from HJI_Vehicle.examples.vehicle.problem_def import setup_problem, config_NN
 # elif system == 'burgers':
 #     from examples.burgers.problem_def import setup_problem, config_NN
 
