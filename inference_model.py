@@ -34,6 +34,8 @@ class InferenceModel:
             self.infer = self.empathetic_inference
         elif model == 'bvp_empathetic':  # use with bvp decision models and env
             self.infer = self.bvp_empathetic_inference
+        elif model == 'belief_approximation':
+            self.infer = self.belief_approximation
         else:
             # placeholder for future development
             pass
@@ -2393,4 +2395,426 @@ class InferenceModel:
                 'belief_count': self.belief_count,
                 'policy_choice': self.policy_choice}
 
+    def belief_approximation(self, agent, sim):  # TODO: do we need to change inference??????
+        """
+        Keeping a distribution of belief
+        Using Q values from value network trained from BVP solver
+        When QH also depends on xM,uM
+        :return:P(beta_h, beta_m_hat | D(k))
+        """
+        # TODO: change inference method
+        # ----------------------------#
+        # variables:
+        # predicted_intent_other: BH hat,
+        # predicted_intent_self: BM tilde,
+        # predicted_policy_other: QH hat,
+        # predicted_policy_self: QM tilde
+        # ----------------------------#
 
+        "importing agents information from Autonomous Vehicle (sim.agents)"
+        self.frame = self.sim.frame
+        self.time = self.sim.time
+        assert len(sim.agents[0].state) == len(sim.agents[0].action)
+        curr_state_h = sim.agents[0].state[self.frame]
+        last_action_h = sim.agents[0].action[self.frame - 1]
+        last_state_h = sim.agents[0].state[self.frame - 1]
+
+        curr_state_m = sim.agents[1].state[self.frame]
+        last_action_m = sim.agents[1].action[self.frame - 1]
+        last_state_m = sim.agents[1].state[self.frame - 1]
+
+        self.traj_h.append([last_state_h, last_action_h])
+        self.traj_m.append([last_state_m, last_action_m])
+
+        def action_prob(state_h, state_m, beta_h, beta_m):
+            # bvp_action prob is in use instead of this, for faster speed
+            """
+            calculate action prob for both agents
+            :param state_h:
+            :param state_m:
+            :return: [p_action_H, p_action_M], where p_action = [p_a1, ..., p_a5]
+            """
+
+            theta_h, lambda_h = beta_h
+            theta_m, lambda_m = beta_m
+            action_set = self.action_set
+            p1_state_nn = np.array([[state_h[1]], [state_h[3]], [state_m[0]], [state_m[2]]])
+            p2_state_nn = np.array([[state_m[0]], [state_m[2]], [state_h[1]], [state_h[3]]])
+            _lambda = [lambda_h, lambda_m]
+
+            _p_action_1 = np.zeros(((len(action_set)), len(action_set)))
+            _p_action_2 = np.zeros(((len(action_set)), len(action_set)))
+            time = np.array([[self.time]])
+            dt = self.sim.dt
+
+            for i, p_a_h in enumerate(_p_action_1):
+                for j, p_a_m in enumerate(_p_action_1[i]):
+                    new_p2_s = dynamics.bvp_dynamics_1d(state_m, action_set[j], dt)
+                    new_p1_s = dynamics.bvp_dynamics_1d(state_h, action_set[i], dt)
+                    if (theta_h, theta_m) == (1, 5):  # Flip A_AN to NA_A
+                        new_p2_state_nn = np.array([[new_p2_s[0]], [new_p2_s[2]], [new_p1_s[1]], [new_p1_s[3]]])
+                        q2, q1 = get_Q_value(new_p2_state_nn, time, np.array([[action_set[j]], [action_set[i]]]),
+                                             (theta_m, theta_h))  # NA_A
+                    else:  # for A_A, NA_NA, NA_A
+                        new_p1_state_nn = np.array([[new_p1_s[1]], [new_p1_s[3]], [new_p2_s[0]], [new_p2_s[2]]])
+                        q1, q2 = get_Q_value(new_p1_state_nn, time, np.array([[action_set[i]], [action_set[j]]]),
+                                             (theta_h, theta_m))
+                    lamb_Q1 = q1 * lambda_h
+                    _p_action_1[i][j] = lamb_Q1
+                    lamb_Q2 = q2 * lambda_m
+                    _p_action_2[i][j] = lamb_Q2
+
+            "using logsumexp to prevent nan"
+            Q1_logsumexp = logsumexp(_p_action_1)
+            Q2_logsumexp = logsumexp(_p_action_2)
+            "normalizing"
+            _p_action_1 -= Q1_logsumexp
+            _p_action_2 -= Q2_logsumexp
+            _p_action_1 = np.exp(_p_action_1)
+            _p_action_2 = np.exp(_p_action_2)
+            assert round(np.sum(_p_action_1)) == 1
+            assert round(np.sum(_p_action_2)) == 1
+            'p action based on observed action of other agent'
+            _last_action_h = self.traj_h[-1][1]
+            _last_action_m = self.traj_m[-1][1]
+            ah = action_set.index(_last_action_h)
+            am = action_set.index(_last_action_m)
+            _pa_1_t = np.transpose(_p_action_1)
+            _pa_1 = _pa_1_t[am]  # column of pa
+            _pa_2 = _p_action_2[ah]
+            _pa_1 /= np.sum(_pa_1)
+            _pa_2 /= np.sum(_pa_2)
+            assert round(np.sum(_pa_1)) == 1
+            assert round(np.sum(_pa_2)) == 1
+
+            return [_pa_1, _pa_2]  # [exp_Q_h[past_am], exp_Q_m[past_ah]]
+
+        def past_action_prob(state_h, state_m, beta_h, beta_m, action_h, action_m):
+            """
+            calculate action prob for both agents
+            :param state_h:
+            :param state_m:
+            :param _lambda:
+            :param theta:
+            :return: [p_action_H, p_action_M], where p_action = [p_a1, ..., p_a5]
+            """
+
+            theta_h, lambda_h = beta_h
+            theta_m, lambda_m = beta_m
+            action_set = self.action_set
+            p1_state_nn = np.array([[state_h[1]], [state_h[3]], [state_m[0]], [state_m[2]]])
+            p2_state_nn = np.array([[state_m[0]], [state_m[2]], [state_h[1]], [state_h[3]]])
+            "get action index"
+            ah = action_set.index(action_h)
+            am = action_set.index(action_m)
+            _lambda = [lambda_h, lambda_m]
+
+            _p_action_1 = np.zeros(((len(action_set)), len(action_set)))
+            _p_action_2 = np.zeros(((len(action_set)), len(action_set)))
+            time = np.array([[self.time]])
+            dt = self.sim.dt
+
+            for i, p_a_h in enumerate(_p_action_1):
+                for j, p_a_m in enumerate(_p_action_1[i]):
+                    new_p2_s = dynamics.bvp_dynamics_1d(state_m, action_set[j], dt)
+                    new_p1_s = dynamics.bvp_dynamics_1d(state_h, action_set[i], dt)
+                    if (theta_h, theta_m) == (1, 5):  # Flip A_AN to NA_A
+                        new_p2_state_nn = np.array([[new_p2_s[0]], [new_p2_s[2]], [new_p1_s[1]], [new_p1_s[3]]])
+                        q2, q1 = get_Q_value(new_p2_state_nn, time, np.array([[action_set[j]], [action_set[i]]]),
+                                             (theta_m, theta_h))  # NA_A
+                    else:  # for A_A, NA_NA, NA_A
+                        new_p1_state_nn = np.array([[new_p1_s[1]], [new_p1_s[3]], [new_p2_s[0]], [new_p2_s[2]]])
+                        q1, q2 = get_Q_value(new_p1_state_nn, time, np.array([[action_set[i]], [action_set[j]]]),
+                                             (theta_h, theta_m))
+                    lamb_Q1 = q1 * lambda_h
+                    _p_action_1[i][j] = lamb_Q1
+                    lamb_Q2 = q2 * lambda_m
+                    _p_action_2[i][j] = lamb_Q2
+
+            "using logsumexp to prevent nan"
+            Q1_logsumexp = logsumexp(_p_action_1)
+            Q2_logsumexp = logsumexp(_p_action_2)
+            "normalizing"
+            _p_action_1 -= Q1_logsumexp
+            _p_action_2 -= Q2_logsumexp
+            _p_action_1 = np.exp(_p_action_1)
+            _p_action_2 = np.exp(_p_action_2)
+            assert round(np.sum(_p_action_1)) == 1
+            assert round(np.sum(_p_action_2)) == 1
+            'p action based on observed action of other agent'
+            _pa_1_t = np.transpose(_p_action_1)
+            _pa_1 = _pa_1_t[am]  # column of pa
+            _pa_2 = _p_action_2[ah]
+            _pa_1 /= np.sum(_pa_1)
+            _pa_2 /= np.sum(_pa_2)
+            assert round(np.sum(_pa_1)) == 1
+            assert round(np.sum(_pa_2)) == 1
+
+            p_action_past = [_pa_1[ah], _pa_2[am]]
+
+            return p_action_past, [_p_action_1, _p_action_2]  # [exp_Q_h, exp_Q_m]
+
+        def bd_action_prob(id, p1_state, p2_state, beta_1, beta_2, last_action):
+            """
+            belief distribution action probability p(u_i|x, theta)
+            calculate action prob for one agent: simplifies the calculation
+            :param p1_state:
+            :param p2_state:
+            :param _lambda:
+            :param theta:
+            :return: p_action of p_i, where p_action = [p_a1, ..., p_a5]
+            """
+            # TODO: implement/import the new belief Q function
+            theta_1, lambda_1 = beta_1
+            theta_2, lambda_2 = beta_2
+            action_set = self.action_set
+            _p_action = np.zeros((len(action_set)))  # 1D
+
+            time = np.array([[self.time]])
+            dt = self.sim.dt
+            "Need state for agent H: xH, vH, xM, vM"
+            if id == 0:
+                # p1_state_nn = np.array([[p1_state[1]], [p1_state[3]], [p2_state[0]], [p2_state[2]]])
+                new_p2_s = dynamics.bvp_dynamics_1d(p2_state, last_action, dt)  # only one new state for p2
+                for i, p_a_h in enumerate(_p_action):
+                    new_p1_s = dynamics.bvp_dynamics_1d(p1_state, action_set[i], dt)
+                    if (theta_1, theta_2) == (1, 5):  # Flip A_AN to NA_A  # TODO: no flipping needed for new Q func?
+                        new_p2_state_nn = np.array([[new_p2_s[0]], [new_p2_s[2]], [new_p1_s[1]], [new_p1_s[3]]])
+                        # q2, q1 = get_Q_value(new_p2_state_nn, time, np.array([[last_action], [action_set[i]]]),
+                        #                      (theta_2, theta_1))  # NA_A
+                        "Q value based on belief distribution b_i"
+                        q1 = "new_Q(new_p1_state_nn, time, np.array([[action_set[i]]), theta_1, belief)"
+
+                    else:  # for A_A, NA_NA, NA_A
+                        new_p1_state_nn = np.array([[new_p1_s[1]], [new_p1_s[3]], [new_p2_s[0]], [new_p2_s[2]]])
+                        # q1, q2 = get_Q_value(new_p1_state_nn, time, np.array([[action_set[i]], [last_action]]),
+                        #                      (theta_1, theta_2))
+                        "Q value based on belief distribution b_i"
+                        q1 = "new_Q(new_p1_state_nn, time, np.array([[action_set[i]]), theta_1, belief)"
+                    _p_action[i] = q1 * lambda_1
+            elif id == 1:  # p2
+                # p2_state_nn = np.array([[p2_state[0]], [p2_state[2]], [p1_state[1]], [p1_state[3]]])
+                new_p1_s = dynamics.bvp_dynamics_1d(p1_state, last_action, dt)  # only one new state for p2
+                for i, p_a_h in enumerate(_p_action):
+                    new_p2_s = dynamics.bvp_dynamics_1d(p2_state, action_set[i], dt)
+                    if (theta_1, theta_2) == (1, 5):  # Flip A_AN to NA_A TODO: no more flipping needed??
+                        new_p2_state_nn = np.array([[new_p2_s[0]], [new_p2_s[2]], [new_p1_s[1]], [new_p1_s[3]]])
+                        # q2, q1 = get_Q_value(new_p2_state_nn, time, np.array([[action_set[i]], [last_action]]),
+                        #                      (theta_2, theta_1))  # NA_A
+                        "Q value based on belief distribution b_i"
+                        q2 = "new_Q(new_p2_state_nn, time, np.array([[action_set[i]]), theta_2, belief)"
+                    else:  # for A_A, NA_NA, NA_A
+                        new_p1_state_nn = np.array([[new_p1_s[1]], [new_p1_s[3]], [new_p2_s[0]], [new_p2_s[2]]])
+                        # q1, q2 = get_Q_value(new_p1_state_nn, time, np.array([[last_action], [action_set[i]]]),
+                        #                      (theta_1, theta_2))
+                        "Q value based on belief distribution b_i"
+                        q2 = "new_Q(new_p2_state_nn, time, np.array([[action_set[i]]), theta_2, belief)"
+                    _p_action[i] = q2 * lambda_2
+            else:
+                print("WARNING! AGENT COUNT EXCEEDED 2")
+
+            "using logsumexp to prevent nan"
+            Q_logsumexp = logsumexp(_p_action)
+            "normalizing"
+            _p_action -= Q_logsumexp
+            _p_action = np.exp(_p_action)
+
+            print("action prob 1 from bvp:", _p_action)
+            assert round(np.sum(_p_action)) == 1
+
+            return _p_action  # exp_Q
+
+        def resample(priors, epsilon):
+            """
+            Resamples the belief P(k-1) from initial belief P0 with some probability of epsilon.
+            :return: resampled belief P(k-1) on lambda and theta
+            """
+            initial_belief = self.p_betas_prior
+            resampled_priors = (1 - epsilon) * priors + epsilon * initial_belief
+            return resampled_priors
+
+        def prob_beta_pair(prior, traj_h, traj_m):
+            """
+            MAIN BELIEF UPDATE ALGORITHM
+            Calculates probability of beta pair (BH, BM_hat) given past observation D(k).
+            :return: P(beta_H, beta_M | D(k)), 8x8
+            """
+
+            p_betas_d = np.zeros((len(self.beta_set), len(self.beta_set)))
+            assert len(p_betas_d) == len(prior)
+            beta_set = self.beta_set
+            "Calculate prob of beta pair given D(k)"
+            past_state_h, last_action_h = traj_h[-1]
+            past_state_m, last_action_m = traj_m[-1]
+            last_actions = [last_action_h, last_action_m]
+            ah = self.action_set.index(last_action_h)
+            am = self.action_set.index(last_action_m)
+            ai = [ah, am]
+            # prior = resample(prior, epsilon=0.05)
+            for i in range(len(p_betas_d)):
+                for j in range(len(p_betas_d[i])):
+
+                    "method 1: get whole action prob table"
+                    # p_a_past, p_action = past_action_prob(past_state_h, past_state_m, beta_set[i], beta_set[j],
+                    #                                       last_action_h, last_action_m)  # action prob for last step!
+
+                    "method 2: only get 1 row of p_action for faster speed"
+                    p_a_past2 = []
+                    for id in range(self.sim.n_agents):
+                        p_a_i = bd_action_prob(id, past_state_h, past_state_m, beta_set[i], beta_set[j], last_actions[id-1])  # TODO: not implemented yet
+                        p_a_past2.append(p_a_i[ai[id]])
+                    "for confirming the two algorithm converges to same value"
+                    # assert np.round(p_a_past[0], 4) == np.round(p_a_past2[0], 4)
+                    # assert np.round(p_a_past[1], 4) == np.round(p_a_past2[1], 4)
+                    p_a_pair = p_a_past2[0] * p_a_past2[1]
+                    "P(Q2|D(k)) = P(uH, uM|x(k), QH, QM) * P(Q2|D(k-1)) / sum(~)"
+                    p_betas_d[i][j] = p_a_pair * prior[i][j]
+            p_betas_d /= np.sum(p_betas_d)
+            p_betas_d = resample(p_betas_d, epsilon=0.05)
+            assert round(np.sum(p_betas_d)) == 1  # make sure this calculation is correct; no need to normalize
+            return p_betas_d
+
+        # function to rearrange for 2D p(theta, lambda|D(k))
+        def marginal_joint_intent(id, _p_beta_d):
+            """
+            Get the marginal P(Beta_i|D(k)) from P(beta_H, beta_M|D(k))
+            :param id:
+            :param _p_beta_d:
+            :return: 4x2 matrix, where row is the lambda and col is the theta, for visualization purposes
+            """
+            marginal = []
+            for t in self.theta_list:
+                marginal.append([])
+            "create a 2D array of (lambda, theta) pairs distribution like single agent case"
+            half = round(len(self.beta_set) / 2)
+            if id == 0:  # H agent
+                for i, row in enumerate(_p_beta_d):  # get sum of row
+                    if i < half:  # in 1D self.beta, first half are NA, or theta1
+                        marginal[0].append(sum(row))
+                    else:
+                        marginal[1].append(sum(row))
+            else:
+                for i, col in enumerate(zip(*_p_beta_d)):
+                    if i < half:
+                        marginal[0].append(sum(col))
+                    else:
+                        marginal[1].append(sum(col))
+            # i-4 if i>3
+            id_lambda = marginal.index(max(marginal))
+            _best_lambda = self.lambda_list[id_lambda] if id_lambda < half else self.lambda_list[id_lambda - half]
+            marginal = np.array(marginal)
+            marginal = marginal.transpose()  # Lambdas x Thetas
+            return marginal, _best_lambda
+
+        def belief_marginal(belief_table):
+            """
+            calculates marginal b_i from common belief table
+            :return: _b_i, probabilities of each agent being aggressive
+            """
+            _b_i = np.zeros(self.n_agents)  # 2x1 probabilities of each agent being aggressive
+            _b_i[0] = np.sum(belief_table[0]) + np.sum(belief_table[1])
+            belief_table_t = np.transpose(belief_table)
+            _b_i[1] = np.sum(belief_table_t[0]) + np.sum(belief_table_t[1])
+
+            return _b_i
+
+        "---------------------------------------------------"
+        "calling functions: P(Q2|D), P(beta2|D), P(x(k+1)|D)"
+        "---------------------------------------------------"
+        "get last predicted beta pair"
+        # if self.frame == 0:  # initially guess the beta
+        #     belief_beta_h, belief_beta_m = self.belief_params
+        #     last_beta_h = belief_beta_h
+        #     last_beta_m = belief_beta_m
+        #     last_theta_h, last_lambda_h = last_beta_h
+        #     last_theta_m, last_lambda_m = last_beta_m
+        #
+        # else:  # get previously predicted beta
+        #     last_beta_h, last_beta_m = self.past_beta[-1]
+        #     last_theta_h, last_lambda_h = last_beta_h
+        #     last_theta_m, last_lambda_m = last_beta_m
+        #     "TEST: fixing the lambda to check"
+        #     # lambda_h, lambda_m = self.lambdas[-1], self.lambdas[-1]
+        #     # beta_h, beta_m = self.betas[-1], self.betas[3]  #H:A, M: NA
+        # p_betas_prior = self.sim.initial_belief
+        'UPDATING COMMON BELIEF TABLE: intent and rationality inference'
+        # using traj[-1] to calculate p_action
+        p_beta_d = prob_beta_pair(prior=self.p_betas_prior, traj_h=self.traj_h, traj_m=self.traj_m)
+
+        'Get the marginal belief b_i, as discussed in the paper:'
+        # TODO: implement a function that calculate the marginal b_i from the common belief p_beta_d
+        b_i = belief_marginal(p_beta_d)
+
+        'recording prior for the next step'
+        self.p_betas_prior = p_beta_d
+
+        'getting best predicted betas, ONLY WORKS for empathetic decision'
+        beta_pair_id = np.unravel_index(p_beta_d.argmax(), p_beta_d.shape)
+        # print("best betas ID at time {0}".format(self.frame), beta_pair_id)
+
+        new_beta_h = self.beta_set[beta_pair_id[0]]
+        new_beta_m = self.beta_set[beta_pair_id[1]]
+        self.past_beta.append([new_beta_h, new_beta_m])
+
+        "getting marginal prob for beta_h or beta_m: THIS IS ONLY FOR PLOTTING, NOT DECISION"
+        # for estimating distribution
+        p_beta_d_h, best_lambda_h = marginal_joint_intent(id=0, _p_beta_d=p_beta_d)
+        p_beta_d_m, best_lambda_m = marginal_joint_intent(id=1, _p_beta_d=p_beta_d)
+
+        "getting most likely action for analysis purpose"
+        last_action_set = [last_action_h, last_action_m]
+        a_id = [self.action_set.index(last_action_h), self.action_set.index(last_action_m)]  # index of actions_t-1
+        predicted_actions = []
+        # TODO: belief distribution action prob not implemented yet
+        for id in range(self.sim.n_agents):
+            if self.sim.decision_type_m == 'bvp_empathetic':
+                if id == 0:
+                    self.policy_choice[0].append(beta_pair_id[1])
+                    p_a_i = bd_action_prob(id, curr_state_h, curr_state_m,
+                                           self.true_params[0], new_beta_m, last_action_set[id - 1])
+                elif id == 1:
+                    self.policy_choice[1].append(beta_pair_id[0])
+                    p_a_i = bd_action_prob(id, curr_state_h, curr_state_m,
+                                           new_beta_h, self.true_params[1], last_action_set[id - 1])
+            elif self.sim.decision_type_m == 'bvp_non_empathetic':
+                true_id = self.sim.true_params_id[id]  # true self beta id (ie. NA, NN --> 1)
+                if id == 0:
+                    p_beta_d_i = p_beta_d[true_id]  # get row based on P1's true beta
+                    pred_beta_m_id = np.argmax(p_beta_d_i)
+                    pred_beta_m = self.beta_set[pred_beta_m_id]
+                    self.policy_choice[0].append(pred_beta_m_id)
+                    p_a_i = bd_action_prob(id, curr_state_h, curr_state_m,
+                                              self.true_params[0], pred_beta_m, last_action_set[id - 1])
+                elif id == 1:
+                    p_beta_d_i = np.transpose(p_beta_d)[true_id]  # get row based on P1's true beta
+                    pred_beta_h_id = np.argmax(p_beta_d_i)
+                    pred_beta_h = self.beta_set[pred_beta_h_id]
+                    self.policy_choice[1].append(pred_beta_h_id)
+                    p_a_i = bd_action_prob(id, curr_state_h, curr_state_m,
+                                              pred_beta_h, self.true_params[1], last_action_set[id - 1])
+            best_action_i = self.action_set[np.argmax(p_a_i)]
+            predicted_actions.append(best_action_i)
+
+        "Counting chosen parameter in the belief table"
+        self.belief_count[beta_pair_id[0]][beta_pair_id[1]] += 1
+
+        # IMPORTANT: Best beta pair =/= Best beta !!!
+        # p_theta_prime, suited_lambdas <- predicted_intent other
+        # p_betas: [BH x BM]
+        # print("state list and prob for H: ", state_list, marginal_state)
+        # print("size of state list at t=1", len(state_list[0]))  # should be 5x5 2D
+        # variables:
+        # predicted_intent_other: BH hat,
+        # predicted_intent_self: BM tilde,
+        # predicted_policy_other: QH hat,
+        # predicted_policy_self: QM tilde
+        # print("-Intent_inf- marginal state H: ", marginal_state_h)
+        return {# 'predicted_states_other': (marginal_state_h, get_state_list(curr_state_h, self.T, self.dt)),  # col of 2D should be H
+                'predicted_actions_other': predicted_actions[0],
+                'predicted_intent_other': [p_beta_d_h, new_beta_h],
+                # 'predicted_states_self': (marginal_state_m, get_state_list(curr_state_m, self.T, self.dt)),
+                'predicted_actions_self': predicted_actions[1],
+                'predicted_intent_self': [p_beta_d_m, new_beta_m],
+                'predicted_intent_all': [p_beta_d, [new_beta_h, new_beta_m]],
+                'belief_count': self.belief_count,
+                'policy_choice': self.policy_choice}
