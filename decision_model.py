@@ -416,6 +416,7 @@ class DecisionModel:
         true_beta_h, true_beta_m = self.true_params
         b_id_h = self.beta_set.index(true_beta_h)
         b_id_m = self.beta_set.index(true_beta_m)
+        "getting the row or column for the non empathetic agent"
         p_b_h = np.transpose(p_beta)[b_id_m]
         p_b_m = p_beta[b_id_h]
         beta_h = self.beta_set[np.argmax(p_b_h)]
@@ -571,19 +572,20 @@ class DecisionModel:
         action_set = self.action_set
 
         # TODO: get belief distribution b_i
-        "this is where non_empathetic is different: using true param of self to observe portion of belief table"
+        "belief distribution non empathetic decision making: using own table to evaluate actions"
         if self.sim.frame == 0:
             p_beta = self.sim.initial_belief
         else:
-            p_beta, ne_betas = self.sim.agents[1].predicted_intent_all[-1]
+            p_beta, b_i = self.sim.agents[1].predicted_intent_all[-1]
         # true_param_id -> get row/col of p_beta -> get predicted beta
         true_beta_h, true_beta_m = self.true_params
-        b_id_h = self.beta_set.index(true_beta_h)
-        b_id_m = self.beta_set.index(true_beta_m)
-        p_b_h = np.transpose(p_beta)[b_id_m]
-        p_b_m = p_beta[b_id_h]
-        beta_h = self.beta_set[np.argmax(p_b_h)]
-        beta_m = self.beta_set[np.argmax(p_b_m)]
+        # b_id_h = self.beta_set.index(true_beta_h)  # beta id
+        # b_id_m = self.beta_set.index(true_beta_m)
+        # "getting the row or column for the non empathetic agent"
+        # p_b_h = np.transpose(p_beta)[b_id_m]
+        # p_b_m = p_beta[b_id_h]
+        # beta_h = self.beta_set[np.argmax(p_b_h)]
+        # beta_m = self.beta_set[np.argmax(p_b_m)]
 
         "METHOD 2: Get p_action based on only the last action observed"
         actions = []
@@ -627,11 +629,12 @@ class DecisionModel:
         "this is where empathetic is different: using predicted param of self with entire belief table"
         if self.sim.frame == 0:
             p_beta = self.sim.initial_belief
-            beta_pair_id = np.unravel_index(p_beta.argmax(), p_beta.shape)
-            beta_h = self.beta_set[beta_pair_id[0]]
-            beta_m = self.beta_set[beta_pair_id[1]]
+            b_i = self.sim.initial_bi
+            # beta_pair_id = np.unravel_index(p_beta.argmax(), p_beta.shape)
+            # beta_h = self.beta_set[beta_pair_id[0]]
+            # beta_m = self.beta_set[beta_pair_id[1]]
         else:
-            p_beta, [beta_h, beta_m] = self.sim.agents[1].predicted_intent_all[-1]
+            p_beta, b_i = self.sim.agents[1].predicted_intent_all[-1]
         true_beta_h, true_beta_m = self.true_params
 
         "METHOD 2: Get p_action based on only the last action observed"

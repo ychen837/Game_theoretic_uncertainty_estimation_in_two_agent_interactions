@@ -1,7 +1,8 @@
-# Explicit Reasoning and Proactive Motion Planning towards Socially Graceful Autonomous Vehicles
+# Game theoretic belief approximation in two agent interactions
 
-Contributors: Steven Elliott, Yiwei Wang, Varun Jammula, Yi Ren, Wenlong Zhang, Yezhou Yang
+Contributors: Yi Chen, Lei Zhang, Tanner Merry, Sunny Amatya, Yi Ren, Wenlong Zhang
 
+##TO BE EDITED
 ## Table of Contents
 1. [Overview](#overview)
 2. [From Honks to Socially Adept Motions](#directions)
