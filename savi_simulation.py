@@ -378,65 +378,6 @@ class Simulation:
             assert np.sum(belief[0][0]) == 1
 
             # TODO: do NE and E have different initial belief???
-            # if self.decision_type[0] == 'bd_non_empathetic':  # should be used in conjunction with belief approx
-            #     belief = []
-            #     belief_0 = np.ones((self.n_agents, len(beta_list)))
-            #     for j, beta in enumerate(beta_list):  # col are betas
-            #         if beta[0] == true_params[0][0]:  # check theta: if its the same as self true param
-            #             belief_0[0][j] *= weight
-            #             if beta[1] == true_params[0][1]:  # check lambda
-            #                 belief_0[0][j] *= weight
-            #             else:
-            #                 belief_0[0][j] *= (1 - weight) / (len(lambda_list) - 1)
-            #         else:
-            #             belief_0[0][j] *= (1 - weight) / (len(theta_list) - 1)
-            #             if beta[1] == true_params[0][1]:  # check lambda
-            #                 belief_0[0][j] *= weight
-            #             else:
-            #                 belief_0[0][j] *= (1 - weight) / (len(lambda_list) - 1)
-            #
-            #     for j, beta_m in enumerate(beta_list):  # col are betas
-            #         if beta_m[0] == theta_m:  # check theta
-            #             belief_0[1][j] *= weight
-            #             if beta_m[1] == lambda_m:  # check lambda
-            #                 belief_0[1][j] *= weight
-            #             else:
-            #                 belief_0[1][j] *= (1 - weight) / (len(lambda_list) - 1)
-            #         else:
-            #             belief_0[1][j] *= (1 - weight) / (len(theta_list) - 1)
-            #             if beta_m[1] == lambda_m:  # check lambda
-            #                 belief_0[1][j] *= weight
-            #             else:
-            #                 belief_0[1][j] *= (1 - weight) / (len(lambda_list) - 1)
-            # else:
-            #     belief_0 = np.ones((self.n_agents, len(beta_list)))
-            #     for j, beta in enumerate(beta_list):  # col are betas
-            #         if beta[0] == theta_h:  # check theta: if its the same as self true param
-            #             belief_0[0][j] *= weight
-            #             if beta[1] == true_params[0][1]:  # check lambda
-            #                 belief_0[0][j] *= weight
-            #             else:
-            #                 belief_0[0][j] *= (1 - weight) / (len(lambda_list) - 1)
-            #         else:
-            #             belief_0[0][j] *= (1 - weight) / (len(theta_list) - 1)
-            #             if beta[1] == true_params[0][1]:  # check lambda
-            #                 belief_0[0][j] *= weight
-            #             else:
-            #                 belief_0[0][j] *= (1 - weight) / (len(lambda_list) - 1)
-            #
-            #     for j, beta_m in enumerate(beta_list):  # col are betas
-            #         if beta_m[0] == theta_m:  # check theta
-            #             belief_0[1][j] *= weight
-            #             if beta_m[1] == lambda_m:  # check lambda
-            #                 belief_0[1][j] *= weight
-            #             else:
-            #                 belief_0[1][j] *= (1 - weight) / (len(lambda_list) - 1)
-            #         else:
-            #             belief_0[1][j] *= (1 - weight) / (len(theta_list) - 1)
-            #             if beta_m[1] == lambda_m:  # check lambda
-            #                 belief_0[1][j] *= weight
-            #             else:
-            #                 belief_0[1][j] *= (1 - weight) / (len(lambda_list) - 1)
 
         elif self.inference_type[1] == 'bd_empathetic':  # belief distribution, sharing belief
             belief = np.ones((self.n_agents, len(beta_list)))

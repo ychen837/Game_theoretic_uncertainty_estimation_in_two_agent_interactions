@@ -648,7 +648,7 @@ class DecisionModel:
             elif i == 1:
                 p_action_i = self.bd_action_prob(i, p1_state, p2_state, beta_h, true_beta_m, last_a_other)
             p_a_2.append(p_action_i)
-            actions.append(action_set[np.argmax(p_action_i)])
+            actions.append(action_set[np.argmax(p_action_i)])  # get argmax action
 
         # print("action taken:", actions, "current state (y is reversed):", p1_state, p2_state)
         # actions = [action1, action2]
